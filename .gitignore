@@ -1,2 +1,4 @@
 .cache.sqlite
 *.zarr
+__pycache__/
+.vscode

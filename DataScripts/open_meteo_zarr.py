@@ -68,9 +68,6 @@ def fetch_forecast_data(run, coords):
 
     responses = openmeteo.weather_api(URL, params=params)
 
-    # One response per location, returned in the same order as requested
-    assert len(responses) == len(coords), "Unexpected number of responses"
-
     frames = []
     for (lat, lon), response in zip(coords, responses):
         hourly = response.Hourly()
@@ -135,29 +132,6 @@ def collect_forecast_data(start_date, no_days):
         # sleep(10) # adjust to avoid reaching minutely limit
 
     print(f"CSV update done: {fetched} locations fetched, {skipped} already saved")
-
-
-def pre_process_data(df):
-    """
-    """
-    # Drop any possible duplicates and Nan
-    df_no_duplicates = df.drop_duplicates(subset=KEY_COLS + ["step_hours"], keep="last")
-    print(f"The dataset dropped {df.size - df_no_duplicates.size} empty solar power values")
-    df_no_na = df_no_duplicates.dropna()
-    print(f"The dataset dropped {df_no_duplicates.size - df_no_na.size} empty solar power values")
-
-    # Drop night time
-    df_only_day = df_no_na[df_no_na["is_day"] == True]
-    df_only_day = df_only_day.drop(columns = "is_day")
-    print(f"The dataset has {df_only_day.size} entries during day")
-
-    # Transform step to datetime
-    df_only_day["step"] = pd.to_timedelta(df_only_day["step_hours"], unit="h")
-    # Sort Index
-    df = df_only_day.set_index(["init_time_utc", "step", "latitude", "longitude"]).sort_index()
-
-    df.to_csv("forecast_cleaned.csv")
-    return df
 
 
 def csv_to_zarr():

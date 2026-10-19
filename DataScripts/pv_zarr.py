@@ -22,14 +22,6 @@ def load_csv():
     return df
 
 
-def pre_process_data(df):
-    df_no_na = df_no_duplicates.dropna()
-    print(f"The dataset dropped {df_no_na.size - df.size} empty solar power values")
-
-    df_no_na.to_csv("pv_cleaned.csv")
-    return df
-
-
 def csv_to_zarr(df):
     time_utc = df[TIME_COLUMN].values
     n_times = len(time_utc)
@@ -58,7 +50,6 @@ def csv_to_zarr(df):
 
 def main():
     df = load_csv()
-    df = pre_process_data()
     csv_to_zarr(df)
 
 

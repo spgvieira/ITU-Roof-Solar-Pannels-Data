@@ -8,11 +8,11 @@ from evaluate import *
 from pv_nwp import *
 
 # DATASET
-PV_CSV = 'Datasets/PV.csv'
-NWP_CSV = 'Datasets/ECMWF_forecast.csv'
+PV_CSV = 'Datasets/PV_DTU.csv'
+NWP_CSV = 'Datasets/forecast_DTU.csv'
 
 # TRAIN/TEST SPLIT (intervals are inclusive [])
-TRAIN_DATE_START = dt.datetime(2025, 10, 16, 0, 0)
+TRAIN_DATE_START = dt.datetime(2025, 10, 20, 0, 0)
 TRAIN_DATE_END = dt.datetime(2026, 6, 30, 23, 0)
 TEST_DATE_START = dt.datetime(2026, 7, 1, 0, 0)
 TEST_DATE_END = dt.datetime(2026, 8, 31, 23, 0)
@@ -30,8 +30,8 @@ FORECAST_COLUMNS = [
     "cloud_cover_high",
     "cloud_cover",
     # "is_day"
-    "hour_sin",
-    "hour_cos",
+    # "hour_sin",
+    # "hour_cos",
 ]
 HISTORY_COLUMNS = FORECAST_COLUMNS + ['solar_power']
 
@@ -40,8 +40,6 @@ HISTORY_COLUMNS = FORECAST_COLUMNS + ['solar_power']
 def get_training_set(train_set_history, train_set_forecast, train_set_y):
     """
     Retrieves train set from original dataset
-    Normalizes training set values
-    Makes sure each training instance only has access to inputs inside memory window
     """
     X_past, X_future, y = [], [], []
 
@@ -57,8 +55,6 @@ def get_training_set(train_set_history, train_set_forecast, train_set_y):
 def get_test_set(test_set_history, test_set_forecast):
     """
     Retrieves test set from original dataset
-    Makes sure each test instance only has access to inputs inside memory window
-    Normalizes X_test values (same as done in training)
     """
     X_past, X_future = [], []
 
@@ -86,7 +82,7 @@ def get_model():
     out = keras.layers.Reshape((FORECAST_PERIOD,))(out)
 
     model = keras.Model([history, forecast], out)
-    model.compile(optimizer=keras.optimizers.Adam(1e-3), loss="mae")
+    model.compile(optimizer=keras.optimizers.Adam(1e-3), loss="huber")
     
     return model
 

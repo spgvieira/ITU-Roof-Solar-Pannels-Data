@@ -1,9 +1,9 @@
 import pandas as pd
 import datetime as dt
 import numpy as np
+from pvlib import solarposition
 import matplotlib.pyplot as plt
 import seaborn as sb
-from scipy import stats
 
 # COORDS
 LATITUDE = 55.66
@@ -19,7 +19,6 @@ CHANNELS = [
     "cloud_cover",
 ]
 
-
 KEY_COLS = ["init_time_utc", "latitude", "longitude"]
 
 def load_dataset(nwp_csv, pv_csv, start_date, end_date):
@@ -31,10 +30,10 @@ def load_dataset(nwp_csv, pv_csv, start_date, end_date):
     nwp = pd.read_csv(nwp_csv, parse_dates=["init_time_utc"])
     pv = pd.read_csv(pv_csv, parse_dates=["time"])
 
-    # Focusing on only one pair of coordinates for now
-    longitude = nwp['longitude'] == LONGITUDE
-    latitude = nwp['latitude'] == LATITUDE
-    nwp = nwp.loc[latitude & longitude]
+    # # Focusing on only one pair of coordinates for now
+    # longitude = nwp['longitude'] == LONGITUDE
+    # latitude = nwp['latitude'] == LATITUDE
+    # nwp = nwp.loc[latitude & longitude]
 
     # Merge dataset
     df = merge_datasets(pv,nwp)
@@ -44,10 +43,7 @@ def load_dataset(nwp_csv, pv_csv, start_date, end_date):
 
     # Pre-process data
     df = pre_process(df)
-    df = encode_time(df)
-
-    # Save dataset to csv
-    save_dataset(df, 'double_check.csv')
+    # df = encode_time(df)
 
     return df
 
@@ -61,8 +57,8 @@ def merge_datasets(pv_dataset, nwp_dataset):
     nwp_dataset['time'] = (nwp_dataset['init_time_utc'] + step).dt.floor("h")
 
     # Merge both datasets and remove not used columns
-    df = pd.merge(pv_dataset, nwp_dataset)
-    df = df.drop(columns = ['latitude', 'longitude', 'step_hours', 'init_time_utc'])
+    df = pd.merge(pv_dataset, nwp_dataset, how="outer")
+    df = df.drop(columns = ['latitude', 'longitude', 'step_hours', 'init_time_utc', 'is_day'])
 
     return df
 
@@ -90,17 +86,19 @@ def pre_process(df):
     full_idx = pd.date_range(df.index.min(), df.index.max(), freq="h", name="time")
     df = df.reindex(full_idx) 
 
-    print("Missing hours:", df["solar_power"].isna().sum())
+    plot_missing_values(df)
 
     # Fill empty  values
     for c in CHANNELS:
         df[c] = df[c].ffill().bfill()
-
-    df['solar_power'] = df['solar_power'].fillna(0)
+    df['solar_power'] = df['solar_power'].fillna(0) # right now filled with zeros maybe better options?
 
     # TODO: Outliers
 
-    # TODO: NightTime clean 
+    # Remove night time
+    solpos = solarposition.get_solarposition(full_idx, LATITUDE, LONGITUDE)
+    is_day = (solpos["apparent_elevation"] == 0).to_numpy()
+    df[is_day] = 0
 
     return df
 
@@ -112,8 +110,6 @@ def encode_time(df):
     hour = df.index.hour
     df["hour_sin"], df["hour_cos"] = np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24)
 
-    # TODO: Solar position instead?
-
     return df
 
 
@@ -124,56 +120,17 @@ def save_dataset(df, csv_path):
     df.to_csv(csv_path, index = True)
 
 
-def plot_nwp_vs_pv_data(df, metric):
+def plot_missing_values(df):
     """
-    Plot the values for a NWP metric in certain interval of time
+    Plot missing values
     """
+    print(f"Summary missing data:", df.isna().sum())
+    plot_df = df.isna().transpose()
+    plot_df.columns = plot_df.columns.strftime("%Y-%m-%d")
 
-    _, ax1 = plt.subplots(figsize=(20, 8))
-
-    ax1.plot(df.index, df[metric], label=metric, color="green", linewidth = 1.5 )
-    ax2 = ax1.twinx()
-    ax2.plot(df.index, df['solar_power'] , label="Solar Energy (Wh)", color="orange", linewidth = 1.5)
-
-    plt.title("PV Power Generation Vs " + metric)
-    plt.show()
-
-
-def correlation_heatmap(df):
-    """
-    Plot correlation between different 
-    """
-    sb.heatmap(df.corr(), annot=True, fmt='.2f',  cmap="crest")
-    plt.show()
-
-
-def box_plot(df, metric):
-    """
-    """
-    sb.boxplot(x=df[metric])
-    plt.title('Boxplot ' + metric)
-    plt.show()
-
-
-def scatter_plot(df, metric):
-    """
-    """
-    plt.scatter(df['solar_power'], df[metric])
-    plt.xlabel('solar power')
-    plt.ylabel(metric)
-    plt.title('Scatter Plot of Solar Power vs ' + metric)
-    plt.show()
-
-
-def z_score(df, metric):
-    """
-    """
-    z = np.abs(stats.zscore(df[metric]))
-
-    threshold_z = 2
-
-    outlier_indices = np.where(z > threshold_z)[0]
-    # no_outliers = df.drop(outlier_indices)
-
-    # print("Original DataFrame Shape:", df.shape)
-    print(metric + "Indetified Outliers:", len(outlier_indices))
+    plt.figure(figsize=(30, 15))
+    sb.heatmap(plot_df,
+            cmap="YlGnBu",
+            cbar_kws={'label': 'Missing Data'})
+    plt.savefig("missing_values.jpg")
+    

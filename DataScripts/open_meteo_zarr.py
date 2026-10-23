@@ -22,12 +22,13 @@ openmeteo = openmeteo_requests.Client(session = retry_session)
 URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 
 # COORDS
-# 55.65990105662984, 12.591038037916826
+# 55.65990105662984, 12.591038037916826 ITU
+# 55.691993, 12.101548 DTU Risø
+LATITUDE = [55.69]
+LONGITUDE = [12.10]
 # COORDS FAKE GRID
-# LATITUDE = [55.6599]
-# LONGITUDE = [12.59103]
-LATITUDE = [55.64, 55.65, 55.66, 55.67, 55.68] 
-LONGITUDE = [12.57, 12.58, 12.59, 12.60, 12.61] 
+# LATITUDE = [55.64, 55.65, 55.66, 55.67, 55.68] 
+# LONGITUDE = [12.57, 12.58, 12.59, 12.60, 12.61] 
 COORDS = list(product(LATITUDE, LONGITUDE))
 
 # CHANNELS
@@ -46,7 +47,7 @@ MODEL =  "ecmwf_ifs" #"dmi_harmonie_arome_europe"
 FORECAST_DAYS = 1
 
 # FILES
-CSV_PATH = "forecast_nwp.csv"
+CSV_PATH = "forecast_DTU.csv"
 ZARR_PATH = "forecast_nwp.zarr"
 KEY_COLS = ["init_time_utc", "latitude", "longitude"]
 
@@ -129,7 +130,7 @@ def collect_forecast_data(start_date, no_days):
         r = fetch_forecast_data(run_str, missing)
         append_to_csv(r)
         fetched += len(missing)
-        # sleep(10) # adjust to avoid reaching minutely limit
+        sleep(10) # adjust to avoid reaching minutely limit
 
     print(f"CSV update done: {fetched} locations fetched, {skipped} already saved")
 
@@ -141,7 +142,6 @@ def csv_to_zarr():
     """
 
     df = pd.read_csv(CSV_PATH, parse_dates=["init_time_utc"])
-    df = pre_process_data(df)
 
     da = (
         df[CHANNELS].to_xarray()
@@ -180,12 +180,12 @@ def compute_normalisation_constants():
 
 
 def main():
-    start_date = dt.datetime(2026, 7, 1, 0, 0)
-    no_days = 1
+    start_date = dt.datetime(2025, 10, 20, 0, 0)
+    no_days = 365
 
     collect_forecast_data(start_date, no_days)
-    csv_to_zarr()
-    compute_normalisation_constants()
+    # csv_to_zarr()
+    # compute_normalisation_constants()
 
 
 if __name__ == "__main__":

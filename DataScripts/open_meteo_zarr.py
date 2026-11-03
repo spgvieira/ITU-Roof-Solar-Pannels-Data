@@ -1,6 +1,6 @@
-import time
 import datetime as dt
 import os
+from time import sleep
 
 import openmeteo_requests
 import requests_cache
@@ -10,8 +10,6 @@ import pandas as pd
 import xarray as xr
 import numpy as np
 from itertools import product
-
-from time import sleep
 
 # Setup the Open-Meteo API client with cache and retry on error
 cache_session = requests_cache.CachedSession('.cache', expire_after = 3600)
@@ -24,11 +22,13 @@ URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 # COORDS
 # 55.65990105662984, 12.591038037916826 ITU
 # 55.691993, 12.101548 DTU Risø
-LATITUDE = [55.69]
-LONGITUDE = [12.10]
+# LATITUDE = [55.69]
+# LONGITUDE = [12.10]
 # COORDS FAKE GRID
 # LATITUDE = [55.64, 55.65, 55.66, 55.67, 55.68] 
 # LONGITUDE = [12.57, 12.58, 12.59, 12.60, 12.61] 
+LATITUDE = [55.67, 55.68, 55.69, 55.70, 55.71] 
+LONGITUDE = [12.08, 12.09, 12.10, 12.11, 12.12] 
 COORDS = list(product(LATITUDE, LONGITUDE))
 
 # CHANNELS
@@ -47,8 +47,8 @@ MODEL =  "ecmwf_ifs" #"dmi_harmonie_arome_europe"
 FORECAST_DAYS = 1
 
 # FILES
-CSV_PATH = "forecast_DTU.csv"
-ZARR_PATH = "forecast_nwp.zarr"
+CSV_PATH = "forecast_DTU_multiple_coords.csv"
+ZARR_PATH = "forecast_nwp_dtu.zarr"
 KEY_COLS = ["init_time_utc", "latitude", "longitude"]
 
 
@@ -79,7 +79,7 @@ def fetch_forecast_data(run, coords):
             "init_time_utc": run,
             "latitude": lat,           
             "longitude": lon,
-            "step_hours": np.arange(n_steps),
+            "step": np.arange(n_steps),
         })
 
         for ch, v in zip(weather_variables, values):
@@ -140,12 +140,16 @@ def csv_to_zarr():
     Reads csv file
     Generates final ZARR
     """
-
     df = pd.read_csv(CSV_PATH, parse_dates=["init_time_utc"])
+    df = pre_process(df)
+
+    ds_raw = (
+        df.set_index(["init_time_utc", "step", "latitude", "longitude"])[CHANNELS]
+        .to_xarray()
+    )
 
     da = (
-        df[CHANNELS].to_xarray()
-        .to_array(dim="channel")
+        ds_raw.to_array(dim="channel")
         .transpose("init_time_utc", "channel", "step", "latitude", "longitude")
         .astype(np.float32)
         .rename("nwp")
@@ -157,6 +161,15 @@ def csv_to_zarr():
     print(f"Wrote {ZARR_PATH}")
     print(ds)
 
+def pre_process(df):
+    """
+    """
+    df["step"] = pd.to_timedelta(df["step"], unit="h")
+
+    for c in CHANNELS:
+        df[c] = df[c].ffill().bfill()
+
+    return df
 
 def compute_normalisation_constants():
     """
@@ -184,8 +197,8 @@ def main():
     no_days = 365
 
     collect_forecast_data(start_date, no_days)
-    # csv_to_zarr()
-    # compute_normalisation_constants()
+    csv_to_zarr()
+    compute_normalisation_constants()
 
 
 if __name__ == "__main__":

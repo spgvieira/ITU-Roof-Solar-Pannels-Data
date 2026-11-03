@@ -57,3 +57,18 @@ def z_score(df, metric):
     # print("Original DataFrame Shape:", df.shape)
     print(metric + "Indetified Outliers:", len(outlier_indices))
 
+
+def plot_missing_values(df):
+    """
+    Plot missing values
+    """
+    print(f"Summary missing data:", df.isna().sum())
+    plot_df = df.isna().transpose()
+    plot_df.columns = plot_df.columns.strftime("%Y-%m-%d")
+
+    plt.figure(figsize=(30, 15))
+    sb.heatmap(plot_df,
+            cmap="YlGnBu",
+            cbar_kws={'label': 'Missing Data'})
+    plt.savefig("missing_values.jpg")
+    

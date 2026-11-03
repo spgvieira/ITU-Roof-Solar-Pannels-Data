@@ -1,85 +1,88 @@
-import datetime as dt
+import argparse
 import numpy as np
-
 from sklearn.preprocessing import StandardScaler
 from tensorflow import keras
 
 from evaluate import *
 from pv_nwp import *
+from config import * 
 
-# DATASET
-PV_CSV = 'Datasets/PV_DTU.csv'
-NWP_CSV = 'Datasets/forecast_DTU.csv'
+PAD = -999.0 
+MIN_HIST = 10
 
-# TRAIN/TEST SPLIT (intervals are inclusive [])
-TRAIN_DATE_START = dt.datetime(2025, 10, 20, 0, 0)
-TRAIN_DATE_END = dt.datetime(2026, 6, 30, 23, 0)
-TEST_DATE_START = dt.datetime(2026, 7, 1, 0, 0)
-TEST_DATE_END = dt.datetime(2026, 8, 31, 23, 0)
-
-# MEMORY
-HISTORY_PERIOD = 48 
-FORECAST_PERIOD = 24
-
-FORECAST_COLUMNS = [
-    "temperature_2m",
-    "shortwave_radiation",
-    "direct_radiation",
-    "cloud_cover_low",
-    "cloud_cover_mid",
-    "cloud_cover_high",
-    "cloud_cover",
-    # "is_day"
-    # "hour_sin",
-    # "hour_cos",
-]
-HISTORY_COLUMNS = FORECAST_COLUMNS + ['solar_power']
-
-
-# Prepare Training data
-def get_training_set(train_set_history, train_set_forecast, train_set_y):
+def get_scalers(cfg, training_set):
     """
-    Retrieves train set from original dataset
+    Get scalers from training set data only
     """
+    scaler_forecast = StandardScaler().fit(training_set[cfg.forecast_columns])
+    scaler_history = StandardScaler().fit(training_set[cfg.target_columns])
+
+    return scaler_forecast, scaler_history
+
+
+def scale(cfg, scaler_history, scaler_forecast, df):
+    """
+    Scale data
+    """
+    history = pd.DataFrame(scaler_history.transform(df[cfg.target_columns]),
+                           index=df.index, columns=cfg.target_columns)
+    forecast = pd.DataFrame(scaler_forecast.transform(df[cfg.forecast_columns]),
+                            index=df.index, columns=cfg.forecast_columns)
+    y =  pd.DataFrame(scaler_history.transform(df[cfg.target_columns]),
+                           index=df.index, columns=cfg.target_columns)
+    return history, forecast, y
+
+
+def window_data(cfg, history_set, forecast_set, y_set = None):
+    """
+    Organizes data into windows
+    """
+    step = pd.Timedelta("1h")
     X_past, X_future, y = [], [], []
 
-    for i in range(HISTORY_PERIOD, len(train_set_history), FORECAST_PERIOD):  
-        X_past.append(train_set_history[i - HISTORY_PERIOD: i])
-        X_future.append(train_set_forecast[i: i + FORECAST_PERIOD])
-        y.append(train_set_y[i: i + FORECAST_PERIOD])
+    for t in pd.date_range(history_set.index.min(), forecast_set.index.max(), freq=cfg.lstm.forecast_period * step):
+        p_start = history_set.index.searchsorted(t)
+        p_end = history_set.index.searchsorted(t + cfg.lstm.history_period * step)
+        f_start = forecast_set.index.searchsorted(t + cfg.lstm.history_period * step)
+        f_end = forecast_set.index.searchsorted(t + cfg.lstm.history_period * step + cfg.lstm.forecast_period * step)
 
-    return np.stack(X_past), np.stack(X_future), np.stack(y)
+        if (p_end - p_start) < MIN_HIST or (f_end - f_start) == 0:
+            continue
+
+        X_past.append(history_set[p_start:p_end])
+        X_future.append(forecast_set[f_start:f_end])
+        if y_set is not None:
+            y.append(y_set[f_start:f_end])
+        else:
+            y.append(forecast_set.index[f_start:f_end])
+
+    lengths = np.array([len(a) for a in X_future])
+    weights = (np.arange(cfg.lstm.forecast_period)[None, :] < lengths[:, None]).astype("float32") 
+
+    X_past = keras.utils.pad_sequences(X_past, maxlen=cfg.lstm.history_period, dtype="float32", padding="post", value=PAD)
+    X_future = keras.utils.pad_sequences(X_future, maxlen=cfg.lstm.forecast_period, dtype="float32", padding="post", value=PAD)
+
+    if y_set is not None:
+        y = keras.utils.pad_sequences(y, maxlen=cfg.lstm.forecast_period, dtype="float32", padding="post", value=0.0) 
+        return X_past, X_future, y, weights
+    else:
+        return X_past, X_future, y, lengths
 
 
-# Prepare Test data
-def get_test_set(test_set_history, test_set_forecast):
-    """
-    Retrieves test set from original dataset
-    """
-    X_past, X_future = [], []
-
-    for i in range(HISTORY_PERIOD, len(test_set_history), FORECAST_PERIOD):  
-        X_past.append(test_set_history[i - HISTORY_PERIOD:i])
-        X_future.append(test_set_forecast[i:i + FORECAST_PERIOD])
-
-    return np.stack(X_past), np.stack(X_future)
-
-
-# Build the model
-def get_model():
+def get_model(cfg):
     """
     Builds LSTM model architecture
     """
-    history = keras.Input((HISTORY_PERIOD, len(HISTORY_COLUMNS)), name="history")
-    forecast = keras.Input((FORECAST_PERIOD, len(FORECAST_COLUMNS)), name="forecast")
+    history = keras.Input((None, len(cfg.target_columns)), name="history")
+    forecast = keras.Input((None, len(cfg.forecast_columns)), name="forecast")
 
-    _, h, c = keras.layers.LSTM(64, return_state=True)(history)
-    x = keras.layers.LSTM(64, return_sequences=True)(forecast, initial_state=[h, c])
+    h_in = keras.layers.Masking(mask_value=PAD)(history)
+    f_in = keras.layers.Masking(mask_value=PAD)(forecast)
+
+    _, h, c = keras.layers.LSTM(64, return_state=True)(h_in)
+    x = keras.layers.LSTM(64, return_sequences=True)(f_in, initial_state=[h, c])
     x = keras.layers.Dropout(0.2)(x)
-    # x = keras.layers.TimeDistributed(keras.layers.Dense(32, activation="relu"))(x)
-    # out = keras.layers.TimeDistributed(keras.layers.Dense(1))(x)
     out = keras.layers.Dense(1)(x)
-    out = keras.layers.Reshape((FORECAST_PERIOD,))(out)
 
     model = keras.Model([history, forecast], out)
     model.compile(optimizer=keras.optimizers.Adam(1e-3), loss="huber")
@@ -87,42 +90,69 @@ def get_model():
     return model
 
 
+def train_model(cfg, X_train, Y_train, weights_train, X_val, Y_val, weights_val ):
+    """
+    Train model
+    """
+    model = get_model(cfg)
+    callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True)
+    model.fit(X_train, Y_train, sample_weight=weights_train,
+            validation_data=(X_val, Y_val, weights_val), 
+            epochs= cfg.lstm.epochs, 
+            batch_size= cfg.lstm.batch_size,
+            callbacks=[callback], verbose=1)
+    
+    return model
+
+
+def predict(model, X_test, scaler_y, lengths):
+    """
+    Make predictions
+    """
+    pred_scaled = model.predict(X_test)[..., 0]
+    pred = scaler_y.inverse_transform(pred_scaled.reshape(-1, 1)).reshape(pred_scaled.shape)
+    pred = np.clip(pred, 0, None)
+    return np.concatenate([p[:n] for p, n in zip(pred, lengths)])   
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="config.yaml")
+    args = parser.parse_args()
+    cfg = load_config(args.config)
 
     # Load Datasets
-    dataset = load_dataset(NWP_CSV, PV_CSV, TRAIN_DATE_START, TEST_DATE_END)
+    dataset = load_dataset(cfg)
     
-    # Split Train/Test
-    training_set = filter_time(dataset, TRAIN_DATE_START, TRAIN_DATE_END)
-    test_set = filter_time(dataset, TEST_DATE_START, TEST_DATE_END)
+    # Split Train/Validation/Test
+    training_set = filter_time(dataset, cfg.train_set.start, cfg.train_set.end)
+    val_set = filter_time(dataset, cfg.val_set.start, cfg.val_set.end)
+    test_set = filter_time(dataset, cfg.test_set.start, cfg.test_set.end)
 
-    # Scale features
-    scaler_forecast = StandardScaler().fit(training_set[FORECAST_COLUMNS])
-    scaler_history = StandardScaler().fit(training_set[HISTORY_COLUMNS])
-    scaler_y = StandardScaler().fit(training_set[['solar_power']])
+    # Get scalers
+    scaler_forecast, scaler_history = get_scalers(cfg, training_set)
 
-    training_history_set_scaled = scaler_history.transform(training_set[HISTORY_COLUMNS])
-    training_forecast_set_scaled = scaler_forecast.transform(training_set[FORECAST_COLUMNS])
-    training_set_y = scaler_y.transform(training_set[['solar_power']]).ravel()
-    test_history_set_scaled = scaler_history.transform(test_set[HISTORY_COLUMNS])
-    test_forecast_set_scaled = scaler_forecast.transform(test_set[FORECAST_COLUMNS])
+    # Scale sets
+    train_history_scaled, train_forecast_scaled, train_y_scaled = scale(cfg, scaler_history, scaler_forecast, training_set)
+    val_history_scaled, val_forecast_scaled, val_y_scaled = scale(cfg, scaler_history, scaler_forecast, val_set)
+    test_history_scaled, test_forecast_scaled, _ = scale(cfg, scaler_history, scaler_forecast, test_set)
 
-    X_train_past, X_train_future, Y_train = get_training_set(training_history_set_scaled, training_forecast_set_scaled, training_set_y)
-    X_test_past, X_test_future = get_test_set(test_history_set_scaled, test_forecast_set_scaled)
+    # Organize data into available data windows 
+    X_train_past, X_train_future, Y_train, weights_train = window_data(cfg, train_history_scaled, train_forecast_scaled, train_y_scaled)
+    X_val_past, X_val_future, Y_val, weights_val = window_data(cfg, val_history_scaled, val_forecast_scaled, val_y_scaled)
+    X_test_past, X_test_future, y_test, lengths_test  = window_data(cfg, test_history_scaled, test_forecast_scaled)
 
     # Train model
-    model = get_model()
-    # callback = keras.callbacks.EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
-    model.fit([X_train_past, X_train_future], Y_train, epochs=50, batch_size=32, verbose=1)
+    model = train_model(cfg, 
+                    [X_train_past, X_train_future], Y_train, weights_train, 
+                    [X_val_past, X_val_future], Y_val, weights_val)
 
     # Test model
-    predicted_scaled = model.predict([X_test_past, X_test_future])
-    predicted = scaler_y.inverse_transform(predicted_scaled.reshape(-1, 1)).reshape(predicted_scaled.shape)
-    predicted = np.clip(predicted, 0, None)
+    predicted = predict(model, [X_test_past, X_test_future], scaler_history, lengths_test)
 
-    predicted = flatten_predictions(FORECAST_PERIOD, predicted)
-    get_evaluation_metrics(test_set[HISTORY_PERIOD:]['solar_power'], predicted)
-    plot_predictions(test_set[HISTORY_PERIOD:], predicted)
+    # Store results
+    forecast_index = y_test[0].append(y_test[1:])
+    store_results(cfg, args.config, test_set.loc[forecast_index], predicted)
 
 
 if __name__ == "__main__":

@@ -2,63 +2,86 @@ import pandas as pd
 import datetime as dt
 import numpy as np
 from pvlib import solarposition
-import matplotlib.pyplot as plt
-import seaborn as sb
+from pyproj import Geod
 
-# COORDS
-LATITUDE = 55.66
-LONGITUDE = 12.59
 
-CHANNELS = [
-    "temperature_2m",
-    "shortwave_radiation",
-    "direct_radiation",
-    "cloud_cover_low",
-    "cloud_cover_mid",
-    "cloud_cover_high",
-    "cloud_cover",
-]
-
-KEY_COLS = ["init_time_utc", "latitude", "longitude"]
-
-def load_dataset(nwp_csv, pv_csv, start_date, end_date):
+def load_dataset(cfg):
     """
     loads both PV and NWP dataset
     merges the two datasets by time
     """
     # Load Datasets
-    nwp = pd.read_csv(nwp_csv, parse_dates=["init_time_utc"])
-    pv = pd.read_csv(pv_csv, parse_dates=["time"])
-
-    # # Focusing on only one pair of coordinates for now
-    # longitude = nwp['longitude'] == LONGITUDE
-    # latitude = nwp['latitude'] == LATITUDE
-    # nwp = nwp.loc[latitude & longitude]
-
-    # Merge dataset
-    df = merge_datasets(pv,nwp)
-
-    # Filter time interval
-    df = filter_time(df, start_date, end_date)
+    nwp = pd.read_csv(cfg.nwp_csv, parse_dates=["init_time_utc"])
+    pv = pd.read_csv(cfg.pv_csv, parse_dates=["time"])
 
     # Pre-process data
-    df = pre_process(df)
+    pv = pre_process_solar(cfg, pv)
+    nwp = pre_process_nwp(cfg, nwp)
+
+    # Merge dataset
+    df = merge_datasets(cfg, pv, nwp)
+
     # df = encode_time(df)
+
+    save_dataset(df, "double_check.csv")
 
     return df
 
 
-def merge_datasets(pv_dataset, nwp_dataset):
+def merge_datasets(cfg, pv_dataset, nwp_dataset):
     """
     Returns one dataset with both pv and nwp information
     """
-    # Match times from both datasets
-    step = pd.to_timedelta(nwp_dataset["step_hours"], unit="h")
-    nwp_dataset['time'] = (nwp_dataset['init_time_utc'] + step).dt.floor("h")
-
     # Merge both datasets and remove not used columns
-    df = pd.merge(pv_dataset, nwp_dataset, how="outer")
-    df = df.drop(columns = ['latitude', 'longitude', 'step_hours', 'init_time_utc', 'is_day'])
+    if cfg.grid_data:
+        df = pd.merge(pv_dataset, nwp_dataset, how='outer')
+        df = add_distance(df, cfg.latitude, cfg.longitude)
+        df = df.set_index(["time", "distance_km"]).sort_index()
+    else:
+        nwp_dataset = nwp_dataset.drop_duplicates(subset="time")
+        df = pd.merge(pv_dataset, nwp_dataset)
+        df = df.set_index("time").sort_index()
+
+    df = df.drop(columns = ['step', 'init_time_utc', 'is_day', 'latitude', 'longitude'])
+
+    return df
+
+
+def pre_process_solar(cfg, df):
+    """
+    """  
+    # Filter time
+    df = filter_time(df, cfg.train_set.start, cfg.test_set.end)
+
+    # Drop hours where there is no solar power measurement
+    df = df.dropna(subset=['solar_power'])
+
+    # Remove night time values
+    solpos = solarposition.get_solarposition(pd.DatetimeIndex(df['time']), cfg.latitude, cfg.longitude)
+    is_night = (solpos["apparent_elevation"] <= 0).to_numpy()
+    df.loc[is_night, 'solar_power'] = 0
+
+    # TODO: Outliers
+    df.loc[df['solar_power'] < 0, 'solar_power'] = 0
+
+    return df
+
+
+def pre_process_nwp(cfg, df):
+    """
+    """
+    # Sum init_time to step to get actual time
+    step = pd.to_timedelta(df["step"], unit="h")
+    df['time'] = (df['init_time_utc'] + step).dt.floor("h")
+
+    # Filter time
+    df = filter_time(df, cfg.train_set.start, cfg.test_set.end)
+
+    # Fill NWP empty values with most recent known value
+    for c in cfg.forecast_columns:
+        df[c] = df[c].ffill().bfill()
+
+    # TODO: Outliers
 
     return df
 
@@ -74,31 +97,6 @@ def filter_time(df, start_date, end_date):
         start = df.index >= start_date
         end = df.index <= end_date
     df = df.loc[start & end]
-
-    return df
-
-
-def pre_process(df):
-    """
-    """
-    # Enforce hourly periodicity 
-    df = df.set_index("time").sort_index()
-    full_idx = pd.date_range(df.index.min(), df.index.max(), freq="h", name="time")
-    df = df.reindex(full_idx) 
-
-    plot_missing_values(df)
-
-    # Fill empty  values
-    for c in CHANNELS:
-        df[c] = df[c].ffill().bfill()
-    df['solar_power'] = df['solar_power'].fillna(0) # right now filled with zeros maybe better options?
-
-    # TODO: Outliers
-
-    # Remove night time
-    solpos = solarposition.get_solarposition(full_idx, LATITUDE, LONGITUDE)
-    is_day = (solpos["apparent_elevation"] == 0).to_numpy()
-    df[is_day] = 0
 
     return df
 
@@ -120,17 +118,18 @@ def save_dataset(df, csv_path):
     df.to_csv(csv_path, index = True)
 
 
-def plot_missing_values(df):
+def add_distance(df, latitude, longitude):
     """
-    Plot missing values
+    Transform different coords into a distance column
     """
-    print(f"Summary missing data:", df.isna().sum())
-    plot_df = df.isna().transpose()
-    plot_df.columns = plot_df.columns.strftime("%Y-%m-%d")
+    geod = Geod(ellps="WGS84")
 
-    plt.figure(figsize=(30, 15))
-    sb.heatmap(plot_df,
-            cmap="YlGnBu",
-            cbar_kws={'label': 'Missing Data'})
-    plt.savefig("missing_values.jpg")
-    
+    n = len(df)
+    _, _, dist_m = geod.inv(
+        df['longitude'].to_numpy(), df['latitude'].to_numpy(),   
+        np.full(n, longitude), np.full(n, latitude),
+    )
+
+    df["distance_km"] = dist_m / 1000
+
+    return df

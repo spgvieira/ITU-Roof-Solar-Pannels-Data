@@ -1,4 +1,4 @@
-init_time_utc,latitude,longitude,step_hours,temperature_2m,shortwave_radiation,direct_radiation,cloud_cover_low,cloud_cover_mid,cloud_cover_high,cloud_cover
+init_time_utc,latitude,longitude,step,temperature_2m,shortwave_radiation,direct_radiation,cloud_cover_low,cloud_cover_mid,cloud_cover_high,cloud_cover
 2025-10-15T00:00,55.64,12.57,0,9.9,,,5.0,0.0,0.0,5.0
 2025-10-15T00:00,55.64,12.57,1,9.5,0.0,0.0,1.0,0.0,0.0,1.0
 2025-10-15T00:00,55.64,12.57,2,9.3,0.0,0.0,8.0,0.0,0.0,8.0

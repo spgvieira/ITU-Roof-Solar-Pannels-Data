@@ -11,9 +11,9 @@ forecast_columns:
   - cloud_cover_high
   - cloud_cover
 
-train_set: {start: 2025-10-20 00:00:00, end: 2026-04-30 23:00:00}
-val_set:   {start: 2026-05-01 00:00:00, end: 2026-06-30 23:00:00}
-test_set:  {start: 2026-07-01 00:00:00, end: 2026-08-31 23:00:00}
+train_set: {start: 2025-07-01 00:00:00, end: 2026-04-15 23:00:00}
+val_set:   {start: 2026-04-16 00:00:00, end: 2026-07-15 23:00:00}
+test_set:  {start: 2026-07-16 00:00:00, end: 2026-08-31 23:00:00}
 
 latitude: 55.69
 longitude: 12.10

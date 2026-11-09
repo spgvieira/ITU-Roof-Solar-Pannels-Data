@@ -2,3 +2,5 @@
 *.zarr
 __pycache__/
 .vscode
+Results
+claude

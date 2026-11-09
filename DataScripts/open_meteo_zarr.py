@@ -24,9 +24,10 @@ URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 # 55.691993, 12.101548 DTU Risø
 # LATITUDE = [55.69]
 # LONGITUDE = [12.10]
-# COORDS FAKE GRID
+# COORDS FAKE GRID ITU
 # LATITUDE = [55.64, 55.65, 55.66, 55.67, 55.68] 
-# LONGITUDE = [12.57, 12.58, 12.59, 12.60, 12.61] 
+# LONGITUDE = [12.57, 12.58, 12.59, 12.60, 12.61]
+# # COORDS FAKE GRID DTU 
 LATITUDE = [55.67, 55.68, 55.69, 55.70, 55.71] 
 LONGITUDE = [12.08, 12.09, 12.10, 12.11, 12.12] 
 COORDS = list(product(LATITUDE, LONGITUDE))
@@ -193,7 +194,7 @@ def compute_normalisation_constants():
 
 
 def main():
-    start_date = dt.datetime(2025, 10, 20, 0, 0)
+    start_date = dt.datetime(2025, 8, 10, 0, 0)
     no_days = 365
 
     collect_forecast_data(start_date, no_days)

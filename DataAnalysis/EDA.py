@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import seaborn as sb
 from scipy import stats
 import numpy as np
+import pandas as pd
 
 def plot_nwp_vs_pv_data(df, metric):
     """
@@ -62,7 +63,6 @@ def plot_missing_values(df):
     """
     Plot missing values
     """
-    print(f"Summary missing data:", df.isna().sum())
     plot_df = df.isna().transpose()
     plot_df.columns = plot_df.columns.strftime("%Y-%m-%d")
 
@@ -71,4 +71,14 @@ def plot_missing_values(df):
             cmap="YlGnBu",
             cbar_kws={'label': 'Missing Data'})
     plt.savefig("missing_values.jpg")
-    
+
+
+def get_missing_value_gaps(v):
+    is_na = v.isna()
+    run_id = (is_na != is_na.shift()).cumsum()
+    gaps = (is_na.groupby(run_id)
+                 .agg(is_gap="first", length="size"))
+    starts = v.index.to_series().groupby(run_id).first()
+    ends = v.index.to_series().groupby(run_id).last()
+    out = pd.DataFrame({"start": starts, "end": ends, "length_h": gaps["length"]})
+    return out[gaps["is_gap"]].reset_index(drop=True)

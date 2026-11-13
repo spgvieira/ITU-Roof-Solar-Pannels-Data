@@ -59,11 +59,11 @@ def pre_process(df):
     full_idx = pd.date_range(df.index.min(), df.index.max(), freq="h", name="time")
     df = df.reindex(full_idx) 
 
-    df['solar_power'] = df['solar_power'].fillna(0) # right now filled with zeros maybe better options?
+    df = df.dropna(subset=['solar_power'])
 
     # Remove night time
     solpos = solarposition.get_solarposition(full_idx, SITE_LATITUDE, SITE_LONGITUDE)
-    is_night = (solpos["apparent_elevation"] == 0).to_numpy()
+    is_night = (solpos["apparent_elevation"] <= 0).to_numpy()
     df[is_night] = 0
 
     return df

@@ -19,11 +19,27 @@ def plot_nwp_vs_pv_data(df, metric):
     plt.show()
 
 
+def plot_nwp_vs_reanalysis_data(nwp, reanalysis, metric):
+    """
+    Plot the values for a NWP metric in certain interval of time
+    """
+
+    plt.figure(figsize=(20, 8))
+
+    plt.plot(nwp['time'], nwp[metric], label="Forecast", color="green", linewidth = 1.0 )
+    plt.plot(reanalysis['time'], reanalysis[metric] , label="Reanalysis", color="orange", linewidth = 1.0)
+
+    plt.title(metric)
+    plt.legend()
+    plt.show()
+
+
+
 def correlation_heatmap(df):
     """
     Plot correlation between different 
     """
-    sb.heatmap(df.corr(), annot=True, fmt='.2f',  cmap="crest")
+    sb.heatmap(df.corr(numeric_only=True), annot=True, fmt='.2f',  cmap="crest")
     plt.show()
 
 
@@ -70,7 +86,7 @@ def plot_missing_values(df):
     sb.heatmap(plot_df,
             cmap="YlGnBu",
             cbar_kws={'label': 'Missing Data'})
-    plt.savefig("missing_values.jpg")
+    plt.show()
 
 
 def get_missing_value_gaps(v):
